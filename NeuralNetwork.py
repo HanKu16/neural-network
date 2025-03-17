@@ -1,15 +1,20 @@
+import ActivationFunctions
 import random
+import json
 
-
-def jump_function(u : float) -> float:
-    return 1 if u >= 0 else 0
 
 class NeuralNetwork:
-    def __init__(self, number_of_inputs: int, number_of_neurons_in_each_layer: list[int]) -> None:
+    def __init__(self) -> None:
+        self.number_of_inputs = None
+        self.number_of_neurons_in_each_layer = None
+        self.weights = None
+        self.activation_function = None
+
+    def setup_for_learning(self, number_of_inputs: int, number_of_neurons_in_each_layer: list[int]):
         self.number_of_inputs = number_of_inputs
         self.number_of_neurons_in_each_layer = number_of_neurons_in_each_layer
         self.weights = self._init_weights_for_all_layers()
-        self.activation_function = jump_function
+        self.activation_function = ActivationFunctions.jump_function
 
     def process(self, inputs: list):
         output_from_layer = []
@@ -22,13 +27,40 @@ class NeuralNetwork:
                 u = 0
                 for input_index in range(len(self.weights[layer_index][neuron_index])):
                     u = u + inputs[input_index] * self.weights[layer_index][neuron_index][input_index]
-                neuron_output = jump_function(u)
+                neuron_output = self.activation_function(u)
                 output_from_layer.append(neuron_output)
             inputs = output_from_layer[:]
         return output_from_layer
 
-    def use_jump_function(self):
-        self.activation_function = jump_function
+    def save_to_file(self, path_to_file: str):
+        network_as_dict = {
+            "number_of_inputs": self.number_of_inputs,
+            "number_of_neurons_in_each_layer": self.number_of_neurons_in_each_layer,
+            "weights": self.weights,
+            "activation_function": self.activation_function
+        }
+        if self.activation_function == ActivationFunctions.jump_function:
+            network_as_dict["activation_function"] = "jump_function"
+        network_json = json.dumps(network_as_dict, indent=4)
+        with open(path_to_file, 'w') as json_file:
+            json_file.write(network_json)
+
+    @staticmethod
+    def read_from_file(path_to_file: str):
+        with open(path_to_file, 'r') as file:
+            data = json.load(file)
+            network = NeuralNetwork()
+            for key, value in data.items():
+                if hasattr(network, key):
+                    if key != "activation_function":
+                        setattr(network, key, value)
+                    else:
+                        if value == "jump_function":
+                            network.use_jump_activation_function()
+            return network
+
+    def use_jump_activation_function(self):
+        self.activation_function = ActivationFunctions.jump_function
 
     def _init_weights_for_all_layers(self):
         weights_for_all_layers = []
