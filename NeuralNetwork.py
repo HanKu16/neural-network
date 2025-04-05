@@ -21,18 +21,17 @@ class NeuralNetwork:
         self.weights = self._init_weights_for_all_layers()
         self.activation_function = ActivationFunctions.jump_function
 
-    def process(self, inputs: list) -> list[float]:
-        output_from_layer = []
-        for layer_index in range(len(self.weights)):
+    def process(self, inputs: list[float]) -> list[float]:
+        output_from_layer: list[float] = []
+        number_of_layers: int = len(self.weights)
+        for layer_index in range(number_of_layers):
             output_from_layer = []
-            one_in_input_for_bias_weight = 1
-            bias_weight_index = 0
-            inputs.insert(bias_weight_index, one_in_input_for_bias_weight)
-            for neuron_index in range(len(self.weights[layer_index])):
-                u = 0
-                for input_index in range(len(self.weights[layer_index][neuron_index])):
-                    u = u + inputs[input_index] * self.weights[layer_index][neuron_index][input_index]
-                neuron_output = self.activation_function(u)
+            inputs = self._insert_bias_input_in_inputs_vector(inputs)
+            number_of_neurons_in_layer: int = len(self.weights[layer_index])
+            for neuron_index in range(number_of_neurons_in_layer):
+                weights_for_neuron: list[float] = self.weights[layer_index][neuron_index]
+                u: float = self._calculate_u(inputs, weights_for_neuron)
+                neuron_output: float = self.activation_function(u)
                 output_from_layer.append(neuron_output)
             inputs = output_from_layer[:]
         return output_from_layer
@@ -77,6 +76,38 @@ class NeuralNetwork:
     def use_sigmoid_activation_function(self) -> None:
         self.activation_function = ActivationFunctions.sigmoid_function
 
+    def _calculate_u(self, inputs: list[float], weights_for_neuron: list[float]) -> float:
+        """Calculate value that is weighted sum of each input in inputs vector
+        and associated weight.
+
+        Args:
+            inputs (list[float]): vector which contains all the input values for given neuron
+            weights_for_neuron (list[float]): vector which contains all weights for neuron
+
+        Returns:
+            float: Value should be passed as argument to activation function
+        """
+        number_of_inputs_for_neuron: int = len(inputs)
+        u = 0
+        for input_index in range(number_of_inputs_for_neuron):
+            u = u + inputs[input_index] * weights_for_neuron[input_index]
+        return u
+
+    def _insert_bias_input_in_inputs_vector(self, inputs: list[float]) -> list[float]:
+        """Insert artificial bias input of value 1 to inputs vector, what
+        allows calculating u by just vectors multiplication.
+
+        Args:
+            inputs (list[float]): vector which contains all the input values for given neuron
+
+        Returns:
+            list[float]: Inputs vector containing bias input.
+        """
+        bias_weight_index: int = 0
+        one_in_input_for_bias_weight: int = 1
+        inputs.insert(bias_weight_index, one_in_input_for_bias_weight)
+        return inputs
+
     def _init_weights_for_all_layers(self) -> list[list[list[float]]]:
         weights_for_all_layers = []
         weights_for_layer_zero = self._init_weights_for_layer_zero()
@@ -92,7 +123,7 @@ class NeuralNetwork:
         directly connected to inputs of the network
 
         Returns:
-            list[list[float]: List (layer 0 of neural network) which contains lists,
+            list[list[float]: Layer 0 of neural network which contains lists,
             where each nested list contains weights for each neuron in layer 0
         """
         weights_for_layer_zero: list[list[float]] = []
