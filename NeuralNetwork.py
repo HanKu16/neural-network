@@ -1,31 +1,32 @@
 from TrainingData import TrainingData
 import ActivationFunctions
-import random
 import json
+from WeightInitializer import WeightInitializer
 
 class NeuralNetwork:
     def __init__(self) -> None:
         self.number_of_inputs = None
         self.number_of_outputs = None
         self.number_of_neurons_in_each_layer = None
-        self.weights = None
         self.activation_function = None
-        self.learning_coefficient = None
+        self.learning_rate = None
+        self.weight_init_algorithm = None
+        self.weights = None
 
     def setup_for_learning(self, number_of_inputs: int,
                            number_of_outputs: int,
                            number_of_neurons_in_each_hidden_layer: list[int],
-                           learning_coefficient: float) -> None:
+                           learning_rate: float) -> None:
         self.number_of_inputs = number_of_inputs
         self.number_of_outputs = number_of_outputs
         self.number_of_neurons_in_each_layer = number_of_neurons_in_each_hidden_layer
         self.number_of_neurons_in_each_layer.append(number_of_outputs)
-        self.weights = self._init_weights_for_all_layers()
-        self.activation_function = ActivationFunctions.jump_function
-        self.learning_coefficient = learning_coefficient
+        self.activation_function = ActivationFunctions.sigmoid_function
+        self.learning_rate = learning_rate
+        self.weight_init_algorithm = "xavier"
 
     def process(self, inputs: list[float]) -> list[float]:
-        """Process inputs vector given to the network and return output vector
+        """Process input vector given to the network and return output vector
         which is product the network and inputs vector.
 
         Args:
@@ -86,6 +87,23 @@ class NeuralNetwork:
                 weights_for_layer.append(weights_for_neuron)
             new_weights.append(weights_for_layer)
         self.weights = new_weights
+        return outputs_from_all_layers[-1]
+
+    def init_weights(self) -> None:
+        """Initialized weights for neural network. Should be called only
+        before learning process, there is no need to init weight, when
+        network is read from file. Uses initialization algorithm configured
+        by api, if not specified explicitly uses Xavier Initialization by
+        default.
+        """
+        weight_initializer: WeightInitializer = WeightInitializer(
+            self.number_of_inputs, self.number_of_neurons_in_each_layer)
+        if self.weight_init_algorithm == "xavier":
+            self.weights = weight_initializer.xavier_init()
+        elif self.weight_init_algorithm == "random":
+            self.weights = weight_initializer.random_init()
+        else:
+            self.weights = weight_initializer.xavier_init()
 
     def _adjust_weight(self, weight: float, error: float, input_for_this_weight: float) -> float:
         """Calculate new weight based on backpropagation algorithm.
@@ -98,7 +116,7 @@ class NeuralNetwork:
         Returns:
             float: New value of the weight.
         """
-        return weight + self.learning_coefficient * error * input_for_this_weight
+        return weight + self.learning_rate * error * input_for_this_weight
 
     def _calculate_errors(self, sample: TrainingData, outputs_from_all_layers: list[list[float]]) -> list[list[float]]:
         """Calculate error for each neuron in all layers.
@@ -144,14 +162,15 @@ class NeuralNetwork:
             errors_for_layer = []
             number_of_neurons_in_layer = self.number_of_neurons_in_each_layer[layer_index]
             for neuron_index in range(number_of_neurons_in_layer):
-                neuron_error = self._calculate_error_for_neuron(layer_index, neuron_index, outputs_from_all_layers, errors[0])
+                neuron_error = self._calculate_error_for_neuron_in_hidden_layer(
+                    layer_index, neuron_index, outputs_from_all_layers, errors[0])
                 errors_for_layer.append(neuron_error)
             errors.insert(0, errors_for_layer)
         return errors
 
-    def _calculate_error_for_neuron(self, layer_index: int, neuron_index: int,
-                                    outputs_from_all_layers: list[list[float]],
-                                    errors_for_next_layer: list[float]) -> float:
+    def _calculate_error_for_neuron_in_hidden_layer(self, layer_index: int, neuron_index: int,
+                                                    outputs_from_all_layers: list[list[float]],
+                                                    errors_for_next_layer: list[float]) -> float:
         """Calculate error for neuron, what is needed to adjust weights for
         next iterations of backpropagation algorithm.
 
@@ -180,7 +199,7 @@ class NeuralNetwork:
             "number_of_outputs": self.number_of_outputs,
             "number_of_neurons_in_each_layer": self.number_of_neurons_in_each_layer,
             "weights": self.weights,
-            "learning_coefficient": self.learning_coefficient
+            "learning_coefficient": self.learning_rate
         }
         if self.activation_function == ActivationFunctions.jump_function:
             network_as_dict["activation_function"] = "jump_function"
@@ -212,7 +231,14 @@ class NeuralNetwork:
     def use_sigmoid_activation_function(self) -> None:
         self.activation_function = ActivationFunctions.sigmoid_function
 
-    def _calculate_u(self, inputs: list[float], weights_for_neuron: list[float]) -> float:
+    def use_xavier_weight_initialization(self) -> None:
+        self.weight_init_algorithm = "xavier"
+
+    def use_random_weight_initialization(self) -> None:
+        self.weight_init_algorithm = "random"
+
+    @staticmethod
+    def _calculate_u(inputs: list[float], weights_for_neuron: list[float]) -> float:
         """Calculate value that is weighted sum of each input in inputs vector
         and associated weight.
 
@@ -229,7 +255,8 @@ class NeuralNetwork:
             u += inputs[input_index] * weights_for_neuron[input_index]
         return u
 
-    def _get_input_vector_with_bias_input(self, inputs: list[float]) -> list[float]:
+    @staticmethod
+    def _get_input_vector_with_bias_input(inputs: list[float]) -> list[float]:
         """Create new inputs vector which contains artificial bias input of value 1
         at index 0.
 
@@ -241,70 +268,6 @@ class NeuralNetwork:
         """
         input_for_bias_weight: int = 1
         return [input_for_bias_weight] + inputs
-
-    def _init_weights_for_all_layers(self) -> list[list[list[float]]]:
-        """Initialize weights for neurons in all layers. To get specific value
-        from returned value refer by [index_layer][neuron_layer][input_layer]
-
-        Returns:
-            list[list[list[float]]]: List of layers, each layer contains neurons
-            and each neuron contains weights.
-        """
-        weights_for_all_layers = []
-        weights_for_layer_zero = self._init_weights_for_layer_zero()
-        weights_for_all_layers.append(weights_for_layer_zero)
-        if len(self.number_of_neurons_in_each_layer) > 1:
-            weights_for_layers_different_than_zero = self._init_weights_for_not_input_layers()
-            weights_for_all_layers.extend(weights_for_layers_different_than_zero)
-        return weights_for_all_layers
-
-    def _init_weights_for_layer_zero(self) -> list[list[float]]:
-        """Initialize weights for neurons that are in layer which is
-        directly connected to inputs of the network.
-
-        Returns:
-            list[list[float]]: Layer 0 of neural network which contains lists,
-            where each nested list contains weights for each neuron in layer 0.
-        """
-        weights_for_layer_zero: list[list[float]] = []
-        number_of_inputs_with_bias: int = self.number_of_inputs + 1
-        for neuron_index in range(self.number_of_neurons_in_each_layer[0]):
-            weights_for_neuron: list[float] = []
-            for input_index in range(number_of_inputs_with_bias):
-                random_weight = self._generate_random_weight()
-                weights_for_neuron.append(random_weight)
-            weights_for_layer_zero.append(weights_for_neuron)
-        return weights_for_layer_zero
-
-    def _init_weights_for_not_input_layers(self) -> list[list[list[float]]]:
-        """Initialize weights for neurons that are in layers that are not directly
-        connected to input layer.
-
-        Returns:
-            list[list[list[float]]]: Layers that are not directly connected with
-            actual inputs of the network.
-        """
-        not_input_layers: list[list[list[float]]] = []
-        number_of_layers: int = len(self.number_of_neurons_in_each_layer)
-        starting_layer_index: int = 1
-        for layer_index in range(starting_layer_index, number_of_layers):
-            weights_for_layer: list[list[float]] = []
-            number_of_neurons_in_layer: int = self.number_of_neurons_in_each_layer[layer_index]
-            for neuron_index in range(number_of_neurons_in_layer):
-                weights_for_neuron: list[float] = []
-                number_of_inputs_for_neuron_plus_bias: int = (
-                        self.number_of_neurons_in_each_layer[layer_index-1] + 1)
-                for input_index in range(number_of_inputs_for_neuron_plus_bias):
-                    random_weight: float = self._generate_random_weight()
-                    weights_for_neuron.append(random_weight)
-                weights_for_layer.append(weights_for_neuron)
-            not_input_layers.append(weights_for_layer)
-        return not_input_layers
-
-    @staticmethod
-    def _generate_random_weight() -> float:
-        random_weight = random.random()
-        return random_weight if random.randint(0, 1) == 0 else random_weight * (-1)
 
     def __str__(self):
         network_as_text = ""
