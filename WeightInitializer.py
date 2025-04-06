@@ -141,5 +141,4 @@ class WeightInitializer:
 
     @staticmethod
     def _random_generate_weight() -> float:
-        random_weight = random()
-        return random_weight if randint(0, 1) == 0 else random_weight * (-1)
+        return uniform(-1, 1)
