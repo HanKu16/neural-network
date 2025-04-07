@@ -11,6 +11,8 @@ class NeuralNetwork:
         self.activation_function = None
         self.learning_rate = None
         self.weight_init_algorithm = None
+        self.t_max = None
+        self.q_min = None
         self.weights = None
 
     def process(self, inputs: list[float]) -> list[float]:
@@ -21,7 +23,7 @@ class NeuralNetwork:
             inputs (list[float]): vector which contains all the input values for given neuron
 
         Returns:
-            list[float]: output vector from the network
+            list[float]: Output vector from the network
         """
         output_from_layer: list[float] = []
         number_of_layers: int = len(self.weights)
@@ -57,6 +59,8 @@ class NeuralNetwork:
                 weights_for_layer.append(weights_for_neuron)
             new_weights.append(weights_for_layer)
         self.weights = new_weights
+        mse = self._calculate_mean_squared_error(outputs_from_all_layers[-1], sample.desired_outputs)
+        print(mse)
         return outputs_from_all_layers[-1]
 
     def init_weights(self) -> None:
@@ -133,13 +137,11 @@ class NeuralNetwork:
                             network.use_sigmoid_activation_function()
             return network
 
-
-    def setup_for_learning(self, number_of_inputs: int,
-                           number_of_outputs: int,
-                           number_of_neurons_in_each_hidden_layer: list[int],
-                           learning_rate: float) -> None:
-        """Set up neural network before learning process. Should not be called when
-        existing neural network instance was read from the file.
+    def setup_structure(self, number_of_inputs: int,
+                        number_of_outputs: int,
+                        number_of_neurons_in_each_hidden_layer: list[int]) -> None:
+        """Set up neural network structure before learning process. Should not
+        be called when existing neural network instance was read from the file.
 
         Args:
             number_of_inputs (int): number of inputs for neural network based on data samples
@@ -148,17 +150,32 @@ class NeuralNetwork:
                 each number in the list specifies number of neuron in each hidden layer.
                 First number specifies number of neurons in input layer, second in the next
                 layer etc. If list is empty neural network will have 0 hidden layers.
-            learning_rate:
-                floating point number which have influence how fast weight of each neuron
-                changes, the bigger number the more rapid changes. It is recommended to
-                use learning rate in scope of (0, 1)
         """
         self.number_of_inputs = number_of_inputs
         self.number_of_outputs = number_of_outputs
         self.number_of_neurons_in_each_layer = number_of_neurons_in_each_hidden_layer
         self.number_of_neurons_in_each_layer.append(number_of_outputs)
         self.activation_function = ActivationFunctions.sigmoid_function
+
+    def setup_learning_params(self, learning_rate: float, t_max: int, q_min: float) -> None:
+        """Set up neural network structure before learning params. Should not
+        be called when existing neural network instance was read from the file.
+
+        Args:
+            learning_rate (float):
+                floating point number which have influence how fast weight of each neuron
+                changes, the bigger number the more rapid changes. It is recommended to
+                use learning rate in scope of (0, 1)
+            t_max (int):
+                max number of iterations to execute by learning algorithm, after reaching
+                this iteration learning algorithm stops
+            q_min (float):
+                when sum of errors for outputs of neural network for each sample in the
+                epoch is less than this number, learning algorithm stops
+        """
         self.learning_rate = learning_rate
+        self.t_max = t_max
+        self.q_min = q_min
         self.weight_init_algorithm = "xavier"
 
     def use_jump_activation_function(self) -> None:
@@ -338,6 +355,24 @@ class NeuralNetwork:
         for input_index in range(number_of_inputs_for_neuron):
             u += inputs[input_index] * weights_for_neuron[input_index]
         return u
+
+    @staticmethod
+    def _calculate_mean_squared_error(outputs: list[float], desired_outputs: list[float]) -> float:
+        """Calculate mean squared error for output vector and desired outputs for that vector.
+
+        Args:
+            outputs (list[float]): vector which contains all the outputs given by output layer
+            desired_outputs (list[float]): vector which contains all the desired outputs from last layer
+
+        Returns:
+            float: Mean squared error for given vector.
+        """
+        mse: float = 0
+        number_of_outputs: int = len(outputs)
+        for output_index in range(number_of_outputs):
+            mse += (desired_outputs[output_index] - outputs[output_index]) ** 2
+        mse *= 0.5
+        return mse
 
     @staticmethod
     def _get_input_vector_with_bias_input(inputs: list[float]) -> list[float]:
