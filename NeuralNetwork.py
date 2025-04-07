@@ -69,7 +69,7 @@ class NeuralNetwork:
 
     def learn(self, sample: TrainingData):
         outputs_from_all_layers, inputs_for_all_layers = self._process_for_learning(sample.inputs)
-        errors: list[list[float]] = self._calculate_errors(sample, outputs_from_all_layers)
+        deltas: list[list[float]] = self._calculate_deltas(sample, outputs_from_all_layers)
         number_of_layers: int = len(self.number_of_neurons_in_each_layer)
         new_weights = []
         for layer_index in range(number_of_layers):
@@ -81,7 +81,7 @@ class NeuralNetwork:
                 for weight_index in range(number_of_weights_for_neuron):
                     weight = self._adjust_weight(
                         self.weights[layer_index][neuron_index][weight_index],
-                        errors[layer_index][neuron_index],
+                        deltas[layer_index][neuron_index],
                         inputs_for_all_layers[layer_index][weight_index])
                     weights_for_neuron.append(weight)
                 weights_for_layer.append(weights_for_neuron)
@@ -105,20 +105,20 @@ class NeuralNetwork:
         else:
             self.weights = weight_initializer.xavier_init()
 
-    def _adjust_weight(self, weight: float, error: float, input_for_this_weight: float) -> float:
+    def _adjust_weight(self, weight: float, delta: float, input_for_this_weight: float) -> float:
         """Calculate new weight based on backpropagation algorithm.
 
         Args:
             weight (float): weight to be adjusted for next iteration
-            error (float): error calculated for neuron
+            delta (float): delta calculated for neuron
             input_for_this_weight (float): input value that was used with weight
 
         Returns:
             float: New value of the weight.
         """
-        return weight + self.learning_rate * error * input_for_this_weight
+        return weight + self.learning_rate * delta * input_for_this_weight
 
-    def _calculate_errors(self, sample: TrainingData, outputs_from_all_layers: list[list[float]]) -> list[list[float]]:
+    def _calculate_deltas(self, sample: TrainingData, outputs_from_all_layers: list[list[float]]) -> list[list[float]]:
         """Calculate error for each neuron in all layers.
 
         Args:
@@ -129,13 +129,13 @@ class NeuralNetwork:
             list[list[float]]: Errors for each neuron in all layers.
         """
         output_from_last_layer: list[float] = outputs_from_all_layers[-1]
-        errors_from_output_layer: list[float] = self._calculate_errors_for_output_layer(
+        errors_from_output_layer: list[float] = self._calculate_deltas_for_output_layer(
             sample, output_from_last_layer)
-        errors_for_hidden_layer: list[list[float]] = self._calculate_errors_for_hidden_layers(
+        errors_for_hidden_layer: list[list[float]] = self._calculate_deltas_for_hidden_layers(
             outputs_from_all_layers, errors_from_output_layer)
         return errors_for_hidden_layer + errors_from_output_layer
 
-    def _calculate_errors_for_output_layer(self, sample: TrainingData, output_from_last_layer: list[float]) -> list[float]:
+    def _calculate_deltas_for_output_layer(self, sample: TrainingData, output_from_last_layer: list[float]) -> list[float]:
         """Calculate error for all neurons in the output layer.
 
         Args:
@@ -153,7 +153,7 @@ class NeuralNetwork:
             errors_for_output_layer.append(error_for_neuron)
         return errors_for_output_layer
 
-    def _calculate_errors_for_hidden_layers(self, outputs_from_all_layers: list[list[float]],
+    def _calculate_deltas_for_hidden_layers(self, outputs_from_all_layers: list[list[float]],
                                             errors_for_output_layer: list[float]):
         number_of_layers: int = len(self.number_of_neurons_in_each_layer)
         one_before_last_layer_index: int = number_of_layers - 2
@@ -162,13 +162,13 @@ class NeuralNetwork:
             errors_for_layer = []
             number_of_neurons_in_layer = self.number_of_neurons_in_each_layer[layer_index]
             for neuron_index in range(number_of_neurons_in_layer):
-                neuron_error = self._calculate_error_for_neuron_in_hidden_layer(
+                neuron_error = self._calculate_delta_for_neuron_in_hidden_layer(
                     layer_index, neuron_index, outputs_from_all_layers, errors[0])
                 errors_for_layer.append(neuron_error)
             errors.insert(0, errors_for_layer)
         return errors
 
-    def _calculate_error_for_neuron_in_hidden_layer(self, layer_index: int, neuron_index: int,
+    def _calculate_delta_for_neuron_in_hidden_layer(self, layer_index: int, neuron_index: int,
                                                     outputs_from_all_layers: list[list[float]],
                                                     errors_for_next_layer: list[float]) -> float:
         """Calculate error for neuron, what is needed to adjust weights for
@@ -183,15 +183,15 @@ class NeuralNetwork:
         Returns:
             float: Error for neuron.
         """
-        error: float = 0
+        delta: float = 0
         number_of_neurons_in_next_layer: int = self.number_of_neurons_in_each_layer[layer_index+1]
         for neuron_in_next_layer_index in range(number_of_neurons_in_next_layer):
             weight = self.weights[layer_index+1][neuron_in_next_layer_index][neuron_index+1]
             error_for_neuron_in_next_layer = errors_for_next_layer[neuron_in_next_layer_index]
-            error += error_for_neuron_in_next_layer * weight
+            delta += error_for_neuron_in_next_layer * weight
         neuron_output = outputs_from_all_layers[layer_index][neuron_index]
-        error = error * (-1) * neuron_output * (1 - neuron_output)
-        return error
+        delta = delta * (-1) * neuron_output * (1 - neuron_output)
+        return delta
 
     def save_to_file(self, path_to_file: str):
         network_as_dict = {
