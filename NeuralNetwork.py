@@ -1,7 +1,9 @@
+from LearningResult import LearningResult
 from TrainingData import TrainingData
 import ActivationFunctions
 import json
 from WeightInitializer import WeightInitializer
+from random import random
 
 class NeuralNetwork:
     def __init__(self) -> None:
@@ -39,29 +41,34 @@ class NeuralNetwork:
             inputs = output_from_layer[:]
         return output_from_layer
 
-    def learn(self, sample: TrainingData):
-        outputs_from_all_layers, inputs_for_all_layers = self._process_for_learning(sample.inputs)
-        deltas: list[list[float]] = self._calculate_deltas(sample, outputs_from_all_layers)
-        number_of_layers: int = len(self.number_of_neurons_in_each_layer)
-        new_weights = []
-        for layer_index in range(number_of_layers):
-            number_of_neurons_in_layer = self.number_of_neurons_in_each_layer[layer_index]
-            weights_for_layer = []
-            for neuron_index in range(number_of_neurons_in_layer):
-                number_of_weights_for_neuron = len(self.weights[layer_index][neuron_index])
-                weights_for_neuron = []
-                for weight_index in range(number_of_weights_for_neuron):
-                    weight = self._adjust_weight(
-                        self.weights[layer_index][neuron_index][weight_index],
-                        deltas[layer_index][neuron_index],
-                        inputs_for_all_layers[layer_index][weight_index])
-                    weights_for_neuron.append(weight)
-                weights_for_layer.append(weights_for_neuron)
-            new_weights.append(weights_for_layer)
-        self.weights = new_weights
-        mse = self._calculate_mean_squared_error(outputs_from_all_layers[-1], sample.desired_outputs)
-        print(mse)
-        return outputs_from_all_layers[-1]
+    def learn(self, learning_set: list[TrainingData]) -> LearningResult:
+        t: int = 0
+        q_for_epoches: list[float] = []
+        q_for_current_epoch = 0
+        e: int = 0
+        indexes_of_not_processed_samples_in_current_iteration: list[int] = list(range(len(learning_set)))
+
+        while t < self.t_max:
+            selected_sample_index: int = int(random() * len(indexes_of_not_processed_samples_in_current_iteration))
+            number = indexes_of_not_processed_samples_in_current_iteration[selected_sample_index]
+            del indexes_of_not_processed_samples_in_current_iteration[selected_sample_index]
+            sample: TrainingData = learning_set[number]
+            outputs_from_all_layers, inputs_for_all_layers = self._process_for_learning(sample.inputs)
+            deltas: list[list[float]] = self._calculate_deltas(sample, outputs_from_all_layers)
+            self._adjust_weights_for_neurons_in_all_layers(deltas, inputs_for_all_layers)
+            mse = self._calculate_mean_squared_error(outputs_from_all_layers[-1], sample.desired_outputs)
+            t += 1
+            q_for_current_epoch += mse
+            if len(indexes_of_not_processed_samples_in_current_iteration) == 0:
+                print(f"e: {e}, q_for_epoch: {q_for_current_epoch}")
+                q_for_epoches.append(q_for_current_epoch)
+                e += 1
+                indexes_of_not_processed_samples_in_current_iteration: list[int] = list(range(len(learning_set)))
+                if q_for_current_epoch < self.q_min:
+                    break
+                else:
+                    q_for_current_epoch = 0
+        return LearningResult(t, e, q_for_epoches)
 
     def init_weights(self) -> None:
         """Initialized weights for neural network. Should be called only
@@ -237,6 +244,33 @@ class NeuralNetwork:
             outputs_from_all_layers.append(output_from_layer)
             input_vector_with_bias = self._get_input_vector_with_bias_input(output_from_layer[:])
         return outputs_from_all_layers, inputs_for_all_layers
+
+    def _adjust_weights_for_neurons_in_all_layers(self, deltas_for_all_layers: list[list[float]],
+                                                  inputs_for_all_layers: list[list[float]]) -> None:
+        """Calculate new weight based on backpropagation algorithm.
+
+        Args:
+            deltas_for_all_layers (list[list[float]]): deltas for each neuron in the network
+            inputs_for_all_layers (list[list[float]]): inputs given for each layer on weight index
+        #     improve comment above
+        """
+        number_of_layers: int = len(self.number_of_neurons_in_each_layer)
+        new_weights: list[list[list[float]]] = []
+        for layer_index in range(number_of_layers):
+            number_of_neurons_in_layer = self.number_of_neurons_in_each_layer[layer_index]
+            weights_for_layer = []
+            for neuron_index in range(number_of_neurons_in_layer):
+                number_of_weights_for_neuron = len(self.weights[layer_index][neuron_index])
+                weights_for_neuron = []
+                for weight_index in range(number_of_weights_for_neuron):
+                    weight = self._adjust_weight(
+                        self.weights[layer_index][neuron_index][weight_index],
+                        deltas_for_all_layers[layer_index][neuron_index],
+                        inputs_for_all_layers[layer_index][weight_index])
+                    weights_for_neuron.append(weight)
+                weights_for_layer.append(weights_for_neuron)
+            new_weights.append(weights_for_layer)
+        self.weights = new_weights
 
     def _adjust_weight(self, weight: float, delta: float, input_for_this_weight: float) -> float:
         """Calculate new weight based on backpropagation algorithm.
