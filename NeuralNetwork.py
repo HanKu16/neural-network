@@ -3,7 +3,7 @@ from TrainingData import TrainingData
 import ActivationFunctions
 import json
 from WeightInitializer import WeightInitializer
-from random import random
+from random import randint
 
 class NeuralNetwork:
     def __init__(self) -> None:
@@ -49,7 +49,7 @@ class NeuralNetwork:
         indexes_of_not_processed_samples_in_current_iteration: list[int] = list(range(len(learning_set)))
 
         while t < self.t_max:
-            selected_sample_index: int = int(random() * len(indexes_of_not_processed_samples_in_current_iteration))
+            selected_sample_index: int = randint(0, len(indexes_of_not_processed_samples_in_current_iteration)-1)
             number = indexes_of_not_processed_samples_in_current_iteration[selected_sample_index]
             del indexes_of_not_processed_samples_in_current_iteration[selected_sample_index]
             sample: TrainingData = learning_set[number]
