@@ -1,6 +1,6 @@
 from numpy import ndarray
-from TestData import TestData
-from TrainingData import TrainingData
+from test_data import TestData
+from training_data import TrainingData
 
 def convert_training_samples_to_learning_set(
         number_of_samples: int, number_of_outputs: int,
