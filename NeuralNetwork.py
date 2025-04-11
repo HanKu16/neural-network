@@ -1,9 +1,12 @@
 from LearningResult import LearningResult
+from TestData import TestData
 from TrainingData import TrainingData
 import ActivationFunctions
 import json
 from WeightInitializer import WeightInitializer
 from random import randint
+import pandas as pd
+from datetime import datetime
 
 class NeuralNetwork:
     def __init__(self) -> None:
@@ -16,6 +19,11 @@ class NeuralNetwork:
         self.t_max = None
         self.q_min = None
         self.weights = None
+        self.test_set = None
+        self.is_test_evaluation_enabled = False
+        self.is_logging_training_progress_to_console_enabled = False
+        self.is_reporting_training_progress_to_excel_file_enabled = False
+        self.report_from_training_as_dict = {}
 
     def process(self, inputs: list[float]) -> list[float]:
         """Process input vector given to the network and return output vector
@@ -46,29 +54,60 @@ class NeuralNetwork:
         q_for_epoches: list[float] = []
         q_for_current_epoch = 0
         e: int = 0
-        indexes_of_not_processed_samples_in_current_iteration: list[int] = list(range(len(learning_set)))
+        indexes_of_not_processed_samples_in_epoch: list[int] = list(range(len(learning_set)))
+        training_progress: dict = {"e": [], "q_for_epoch": [], "q_for_test_set": []}
 
+        print(f"Training started at {datetime.now()}")
         while t < self.t_max:
-            selected_sample_index: int = randint(0, len(indexes_of_not_processed_samples_in_current_iteration)-1)
-            number = indexes_of_not_processed_samples_in_current_iteration[selected_sample_index]
-            del indexes_of_not_processed_samples_in_current_iteration[selected_sample_index]
-            sample: TrainingData = learning_set[number]
-            outputs_from_all_layers, inputs_for_all_layers = self._process_for_learning(sample.inputs)
+            sample: TrainingData = self._get_random_sample_from_learning_set(
+                indexes_of_not_processed_samples_in_epoch, learning_set)
+            outputs_from_all_layers, inputs_for_all_layers = (
+                self._process_for_learning(sample.inputs))
             deltas: list[list[float]] = self._calculate_deltas(sample, outputs_from_all_layers)
             self._adjust_weights_for_neurons_in_all_layers(deltas, inputs_for_all_layers)
             mse = self._calculate_mean_squared_error(outputs_from_all_layers[-1], sample.desired_outputs)
             t += 1
             q_for_current_epoch += mse
-            if len(indexes_of_not_processed_samples_in_current_iteration) == 0:
-                print(f"e: {e}, q_for_epoch: {q_for_current_epoch}")
+            if len(indexes_of_not_processed_samples_in_epoch) == 0:
+                training_progress = self._handle_epoch_end(e, q_for_current_epoch, training_progress)
                 q_for_epoches.append(q_for_current_epoch)
                 e += 1
-                indexes_of_not_processed_samples_in_current_iteration: list[int] = list(range(len(learning_set)))
+                indexes_of_not_processed_samples_in_epoch: list[int] = list(range(len(learning_set)))
+                if (e >= 50) and (e % 10 == 0):
+                    choice = input("Do you want to stop [yes/no]: ")
+                    if choice == 'yes':
+                        break
                 if q_for_current_epoch < self.q_min:
                     break
                 else:
                     q_for_current_epoch = 0
+        print(f"Training finished at {datetime.now()}")
+        if self.is_reporting_training_progress_to_excel_file_enabled:
+            self._report_training_progress_to_excel_file(training_progress)
         return LearningResult(t, e, q_for_epoches)
+
+    def _get_random_sample_from_learning_set(self, indexes_of_not_processed_samples_in_current_epoch: list[int],
+                                             learning_set: list[TrainingData]) -> TrainingData:
+        index_from_not_processed_samples: int = randint(
+            0, len(indexes_of_not_processed_samples_in_current_epoch) - 1)
+        sample_index = indexes_of_not_processed_samples_in_current_epoch[index_from_not_processed_samples]
+        del indexes_of_not_processed_samples_in_current_epoch[index_from_not_processed_samples]
+        sample: TrainingData = learning_set[sample_index]
+        return sample
+
+    def _handle_epoch_end(self, e: int, q_for_epoch: float, training_progress: dict) -> dict:
+        log_message = f"e: {e} | q for epoch: {q_for_epoch}"
+        if self.is_test_evaluation_enabled:
+            q_for_test_set = self._process_test_set()
+            log_message += f" | q for test set: {q_for_test_set}"
+            training_progress["q_for_test_set"].append(q_for_test_set)
+        else:
+            training_progress["q_for_test_set"].append("-")
+        if self.is_logging_training_progress_to_console_enabled:
+            print(log_message)
+        training_progress["e"].append(e)
+        training_progress["q_for_epoch"].append(q_for_epoch)
+        return training_progress
 
     def init_weights(self) -> None:
         """Initialized weights for neural network. Should be called only
@@ -212,6 +251,20 @@ class NeuralNetwork:
         """
         self.weight_init_algorithm = "random"
 
+    def enable_test_set_evaluation_after_each_epoch(self, test_set: list[TestData]):
+        self.is_test_evaluation_enabled = True
+        self.test_set = test_set
+
+    def enable_logging_training_progress_to_console(self):
+        self.is_logging_training_progress_to_console_enabled = True
+
+    def enable_reporting_training_progress_to_excel_file(self):
+        self.is_reporting_training_progress_to_excel_file_enabled = True
+
+    def _report_training_progress_to_excel_file(self, training_progress: dict) -> None:
+        df = pd.DataFrame(training_progress)
+        df.to_excel("report_from_training.xlsx", index=False)
+
     def _process_for_learning(self, inputs_from_sample: list[float]) -> (list[list[float]], list[list[float]]):
         """Process given sample from 'inputs_from_sample'.
 
@@ -244,6 +297,20 @@ class NeuralNetwork:
             outputs_from_all_layers.append(output_from_layer)
             input_vector_with_bias = self._get_input_vector_with_bias_input(output_from_layer[:])
         return outputs_from_all_layers, inputs_for_all_layers
+
+    def _process_test_set(self) -> float:
+        q_for_test_set: float = 0
+        indexes_of_not_processed_samples: list[int] = list(range(len(self.test_set)))
+
+        while len(indexes_of_not_processed_samples) != 0:
+            selected_sample_index: int = randint(0, len(indexes_of_not_processed_samples) - 1)
+            number = indexes_of_not_processed_samples[selected_sample_index]
+            del indexes_of_not_processed_samples[selected_sample_index]
+            sample: TestData = self.test_set[number]
+            outputs = self.process(sample.inputs)
+            mse = self._calculate_mean_squared_error(outputs, sample.desired_outputs)
+            q_for_test_set += mse
+        return q_for_test_set
 
     def _adjust_weights_for_neurons_in_all_layers(self, deltas_for_all_layers: list[list[float]],
                                                   inputs_for_all_layers: list[list[float]]) -> None:
