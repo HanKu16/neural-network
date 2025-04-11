@@ -1,7 +1,10 @@
+import numpy as np
+
+
 class TrainingData:
     def __init__(self, inputs: list[float], number_of_outputs: int,
                  indexes_of_desired_active_outputs: list[int], label: str) -> None:
-        self.inputs = inputs
+        self.inputs = np.array(inputs)
         self.desired_outputs = self._set_desired_outputs(
             number_of_outputs, indexes_of_desired_active_outputs)
         self.label = label
@@ -14,5 +17,5 @@ class TrainingData:
                 desired_outputs.append(1)
             else:
                 desired_outputs.append(0)
-        return desired_outputs
+        return np.array(desired_outputs)
     
