@@ -1,5 +1,4 @@
-from learning_result import LearningResult
-from test_data import TestData
+import numpy as np
 from training_data import TrainingData
 import activation_functions
 import json
@@ -23,7 +22,6 @@ class NeuralNetwork:
         self.is_test_evaluation_enabled = False
         self.is_logging_training_progress_to_console_enabled = False
         self.is_reporting_training_progress_to_excel_file_enabled = False
-        self.report_from_training_as_dict = {}
 
     def process(self, inputs: list[float]) -> list[float]:
         """Process input vector given to the network and return output vector
@@ -35,45 +33,42 @@ class NeuralNetwork:
         Returns:
             list[float]: Output vector from the network
         """
-        output_from_layer: list[float] = []
-        number_of_layers: int = len(self.weights)
+        number_of_layers: int = len(self.number_of_neurons_in_each_layer)
+        input_vector: np.ndarray = np.array(inputs)
         for layer_index in range(number_of_layers):
-            output_from_layer = []
-            inputs = self._get_input_vector_with_bias_input(inputs)
-            number_of_neurons_in_layer: int = len(self.weights[layer_index])
-            for neuron_index in range(number_of_neurons_in_layer):
-                weights_for_neuron: list[float] = self.weights[layer_index][neuron_index]
-                u: float = self._calculate_u(inputs, weights_for_neuron)
-                neuron_output: float = self.activation_function(u)
-                output_from_layer.append(neuron_output)
-            inputs = output_from_layer[:]
-        return output_from_layer
+            input_vector = np.hstack(([1.0], input_vector))
+            weighted_sums_vector: np.ndarray = self.weights[layer_index] @ input_vector
+            input_vector = self.activation_function(weighted_sums_vector)
+        output_vector: list[float] = input_vector.tolist()
+        return output_vector
 
-    def learn(self, learning_set: list[TrainingData]) -> LearningResult:
+    def learn(self, learning_set: list[TrainingData]) -> dict:
         t: int = 0
-        q_for_epoches: list[float] = []
-        q_for_current_epoch = 0
         e: int = 0
+        q_for_current_epoch: float = 0
         indexes_of_not_processed_samples_in_epoch: list[int] = list(range(len(learning_set)))
-        training_progress: dict = {"e": [], "q_for_epoch": [], "q_for_test_set": []}
+        training_progress: dict = self._init_training_progress_dict()
+        started_at: datetime = datetime.now()
+        finished_at: datetime = started_at
 
-        print(f"Training started at {datetime.now()}")
         while t < self.t_max:
-            sample: TrainingData = self._get_random_sample_from_learning_set(
+            sample: TrainingData = self._get_random_sample_from_set(
                 indexes_of_not_processed_samples_in_epoch, learning_set)
             outputs_from_all_layers, inputs_for_all_layers = (
                 self._process_for_learning(sample.inputs))
-            deltas: list[list[float]] = self._calculate_deltas(sample, outputs_from_all_layers)
-            self._adjust_weights_for_neurons_in_all_layers(deltas, inputs_for_all_layers)
-            mse = self._calculate_mean_squared_error(outputs_from_all_layers[-1], sample.desired_outputs)
+            deltas: list[np.ndarray] = self._calculate_deltas(sample, outputs_from_all_layers)
+            self._adjust_weights(deltas, inputs_for_all_layers)
+            mse: float = self._calculate_mean_squared_error(
+                outputs_from_all_layers[-1], sample.desired_outputs)
             t += 1
             q_for_current_epoch += mse
             if len(indexes_of_not_processed_samples_in_epoch) == 0:
-                training_progress = self._handle_epoch_end(e, q_for_current_epoch, training_progress)
-                q_for_epoches.append(q_for_current_epoch)
+                finished_at = datetime.now()
+                training_progress = self._handle_epoch_end(
+                    e, q_for_current_epoch, started_at, finished_at, training_progress)
                 e += 1
                 indexes_of_not_processed_samples_in_epoch: list[int] = list(range(len(learning_set)))
-                if (e >= 50) and (e % 10 == 0):
+                if (e >= 150) and (e % 10 == 0):
                     choice = input("Do you want to stop [yes/no]: ")
                     if choice == 'yes':
                         break
@@ -81,32 +76,9 @@ class NeuralNetwork:
                     break
                 else:
                     q_for_current_epoch = 0
-        print(f"Training finished at {datetime.now()}")
+                started_at = datetime.now()
         if self.is_reporting_training_progress_to_excel_file_enabled:
             self._report_training_progress_to_excel_file(training_progress)
-        return LearningResult(t, e, q_for_epoches)
-
-    def _get_random_sample_from_learning_set(self, indexes_of_not_processed_samples_in_current_epoch: list[int],
-                                             learning_set: list[TrainingData]) -> TrainingData:
-        index_from_not_processed_samples: int = randint(
-            0, len(indexes_of_not_processed_samples_in_current_epoch) - 1)
-        sample_index = indexes_of_not_processed_samples_in_current_epoch[index_from_not_processed_samples]
-        del indexes_of_not_processed_samples_in_current_epoch[index_from_not_processed_samples]
-        sample: TrainingData = learning_set[sample_index]
-        return sample
-
-    def _handle_epoch_end(self, e: int, q_for_epoch: float, training_progress: dict) -> dict:
-        log_message = f"e: {e} | q for epoch: {q_for_epoch}"
-        if self.is_test_evaluation_enabled:
-            q_for_test_set = self._process_test_set()
-            log_message += f" | q for test set: {q_for_test_set}"
-            training_progress["q_for_test_set"].append(q_for_test_set)
-        else:
-            training_progress["q_for_test_set"].append("-")
-        if self.is_logging_training_progress_to_console_enabled:
-            print(log_message)
-        training_progress["e"].append(e)
-        training_progress["q_for_epoch"].append(q_for_epoch)
         return training_progress
 
     def init_weights(self) -> None:
@@ -121,7 +93,7 @@ class NeuralNetwork:
         if self.weight_init_algorithm == "xavier":
             self.weights = weight_initializer.xavier_init()
         elif self.weight_init_algorithm == "random":
-            self.weights = weight_initializer.random_init()
+            self.weights = weight_initializer.random_init(-1, 1)
         else:
             self.weights = weight_initializer.xavier_init()
 
@@ -137,13 +109,16 @@ class NeuralNetwork:
             IsADirectoryError: If 'path_to_file' is a directory not path to .txt file
             OSError: If something goes wrong on low level operations
         """
+        weights = []
+        for i in range(len(self.weights)):
+            weights.append(self.weights[i].tolist())
         network_as_dict = {
             "number_of_inputs": self.number_of_inputs,
             "number_of_outputs": self.number_of_outputs,
             "number_of_neurons_in_each_layer": self.number_of_neurons_in_each_layer,
             "learning_rate": self.learning_rate,
             "weight_init_algorithm": self.weight_init_algorithm,
-            "weights": self.weights
+            "weights": weights
         }
         if self.activation_function == activation_functions.jump_function:
             network_as_dict["activation_function"] = "jump_function"
@@ -251,28 +226,28 @@ class NeuralNetwork:
         """
         self.weight_init_algorithm = "random"
 
-    def enable_test_set_evaluation_after_each_epoch(self, test_set: list[TestData]):
+    def enable_test_set_evaluation_after_each_epoch(self, test_set: list[TrainingData]):
+        """After each processed epoch test set will be processed to check quality of model."""
         self.is_test_evaluation_enabled = True
         self.test_set = test_set
 
     def enable_logging_training_progress_to_console(self):
+        """Information about each processed epoch will be logged in the console."""
         self.is_logging_training_progress_to_console_enabled = True
 
     def enable_reporting_training_progress_to_excel_file(self):
+        """Information about each processed epoch will be saved to excel file."""
         self.is_reporting_training_progress_to_excel_file_enabled = True
 
-    def _report_training_progress_to_excel_file(self, training_progress: dict) -> None:
-        df = pd.DataFrame(training_progress)
-        df.to_excel("report_from_training.xlsx", index=False)
-
-    def _process_for_learning(self, inputs_from_sample: list[float]) -> (list[list[float]], list[list[float]]):
-        """Process given sample from 'inputs_from_sample'.
+    def _process_for_learning(self, inputs_from_sample: np.ndarray) \
+            -> (list[np.ndarray], list[np.ndarray]):
+        """Process given sample.
 
         Args:
-            inputs_from_sample (list[float]): input vector from data sample
+            inputs_from_sample (ndarray): input vector from data sample
 
         Returns:
-            (list[list[float]], list[list[float]]):
+            (list[np.ndarray], list[np.ndarray]):
                 Elements in the value of first tuple are all the outputs given by each neuron
                 in the network for given sample 'inputs_from_sample'. To get output of
                 particular neuron refer by [layer_index][neuron_index].
@@ -281,213 +256,210 @@ class NeuralNetwork:
                 (input number) of neuron refer by [layer_index][weight_index]. Remember that
                 for each layer on [layer_index][0] there is bias input equal 1.
         """
-        outputs_from_all_layers: list[list[float]] = []
-        inputs_for_all_layers: list[list[float]] = []
+        inputs_for_all_layers: list[np.ndarray] = []
+        outputs_from_all_layers: list[np.ndarray] = []
         number_of_layers: int = len(self.weights)
-        input_vector_with_bias = self._get_input_vector_with_bias_input(inputs_from_sample)
+        input_vector: np.ndarray = inputs_from_sample
         for layer_index in range(number_of_layers):
-            output_from_layer = []
-            inputs_for_all_layers.append(input_vector_with_bias[:])
-            number_of_neurons_in_layer: int = self.number_of_neurons_in_each_layer[layer_index]
-            for neuron_index in range(number_of_neurons_in_layer):
-                weights_for_neuron: list[float] = self.weights[layer_index][neuron_index]
-                u: float = self._calculate_u(input_vector_with_bias, weights_for_neuron)
-                neuron_output: float = self.activation_function(u)
-                output_from_layer.append(neuron_output)
-            outputs_from_all_layers.append(output_from_layer)
-            input_vector_with_bias = self._get_input_vector_with_bias_input(output_from_layer[:])
+            input_vector_with_bias: np.ndarray = np.hstack(([1.0], input_vector[:]))
+            inputs_for_all_layers.append(input_vector_with_bias)
+            weighted_sum_vector: np.ndarray = self.weights[layer_index] @ input_vector_with_bias
+            output_vector: np.ndarray = self.activation_function(weighted_sum_vector)
+            outputs_from_all_layers.append(output_vector)
+            input_vector = output_vector
         return outputs_from_all_layers, inputs_for_all_layers
 
+    def _adjust_weights(self, deltas_for_all_layers: list[np.ndarray],
+                        inputs_for_all_layers: list[np.ndarray]) -> None:
+        """Adapt weights based on backpropagation algorithm.
+
+        Args:
+            deltas_for_all_layers (list[np.ndarray]): deltas for each neuron in the network
+            inputs_for_all_layers (list[np.ndarray]): inputs given for each layer
+        """
+        weights: list[np.ndarray] = []
+        number_of_layers: int = len(self.number_of_neurons_in_each_layer)
+        for layer_index in range(number_of_layers):
+            weights_for_layer: list[np.ndarray] = []
+            number_of_neurons_in_layer: int = self.number_of_neurons_in_each_layer[layer_index]
+            for neuron_index in range(number_of_neurons_in_layer):
+                weights_for_neuron: np.ndarray = (self.weights[layer_index][neuron_index] + self.learning_rate *
+                                      deltas_for_all_layers[layer_index][neuron_index] * inputs_for_all_layers[layer_index])
+                weights_for_layer.append(weights_for_neuron)
+            weights.append(np.array(weights_for_layer))
+        self.weights = weights
+
     def _process_test_set(self) -> float:
+        """Process test set to check quality of model at current state.
+
+        Returns:
+            float:
+                Sum of mean squared error for all samples in test set.
+        """
         q_for_test_set: float = 0
         indexes_of_not_processed_samples: list[int] = list(range(len(self.test_set)))
 
         while len(indexes_of_not_processed_samples) != 0:
-            selected_sample_index: int = randint(0, len(indexes_of_not_processed_samples) - 1)
-            number = indexes_of_not_processed_samples[selected_sample_index]
-            del indexes_of_not_processed_samples[selected_sample_index]
-            sample: TestData = self.test_set[number]
-            outputs = self.process(sample.inputs)
-            mse = self._calculate_mean_squared_error(outputs, sample.desired_outputs)
+            sample: TrainingData = self._get_random_sample_from_set(
+                indexes_of_not_processed_samples, self.test_set)
+            outputs: list[float] = self.process(sample.inputs)
+            mse: float = self._calculate_mean_squared_error(np.array(outputs), sample.desired_outputs)
             q_for_test_set += mse
         return q_for_test_set
 
-    def _adjust_weights_for_neurons_in_all_layers(self, deltas_for_all_layers: list[list[float]],
-                                                  inputs_for_all_layers: list[list[float]]) -> None:
-        """Calculate new weight based on backpropagation algorithm.
+    def _handle_epoch_end(self, e: int, q_for_epoch: float, started_at, finished_at,
+                          training_progress: dict) -> dict:
+        """Logs messages if set. Updated training progress information.
 
         Args:
-            deltas_for_all_layers (list[list[float]]): deltas for each neuron in the network
-            inputs_for_all_layers (list[list[float]]): inputs given for each layer on weight index
-        #     improve comment above
-        """
-        number_of_layers: int = len(self.number_of_neurons_in_each_layer)
-        new_weights: list[list[list[float]]] = []
-        for layer_index in range(number_of_layers):
-            number_of_neurons_in_layer = self.number_of_neurons_in_each_layer[layer_index]
-            weights_for_layer = []
-            for neuron_index in range(number_of_neurons_in_layer):
-                number_of_weights_for_neuron = len(self.weights[layer_index][neuron_index])
-                weights_for_neuron = []
-                for weight_index in range(number_of_weights_for_neuron):
-                    weight = self._adjust_weight(
-                        self.weights[layer_index][neuron_index][weight_index],
-                        deltas_for_all_layers[layer_index][neuron_index],
-                        inputs_for_all_layers[layer_index][weight_index])
-                    weights_for_neuron.append(weight)
-                weights_for_layer.append(weights_for_neuron)
-            new_weights.append(weights_for_layer)
-        self.weights = new_weights
-
-    def _adjust_weight(self, weight: float, delta: float, input_for_this_weight: float) -> float:
-        """Calculate new weight based on backpropagation algorithm.
-
-        Args:
-            weight (float): weight to be adjusted for next iteration
-            delta (float): delta calculated for neuron
-            input_for_this_weight (float): input value that was used with weight
+            e (int): index of epoch that finished
+            q_for_epoch (float): error for epoch
+            training_progress (dict): dictionary storing information about training
 
         Returns:
-            float: New value of the weight.
+            dict: Dictionary updated with information about last processed epoch.
         """
-        return weight + self.learning_rate * delta * input_for_this_weight
+        training_progress["e"].append(e)
+        training_progress["q_for_epoch"].append(q_for_epoch)
+        training_progress["started_at"].append(started_at)
+        training_progress["finished_at"].append(finished_at)
+        training_progress["total_time"].append(finished_at-started_at)
+        if self.is_test_evaluation_enabled:
+            q_for_test_set = self._process_test_set()
+            log_message = (f"epoch {e} | q for epoch {q_for_epoch} | q for test {q_for_test_set} | "
+                           f"started at {started_at} | finished at {finished_at} | "
+                           f"total time {finished_at - started_at}")
+            training_progress["q_for_test_set"].append(q_for_test_set)
+        else:
+            log_message = (f"epoch {e} | q for epoch {q_for_epoch} | "
+                           f"started at {started_at} | finished at {finished_at} | "
+                           f"total time {finished_at - started_at}")
+        if self.is_logging_training_progress_to_console_enabled:
+            print(log_message)
+        return training_progress
 
-    def _calculate_deltas(self, sample: TrainingData, outputs_from_all_layers: list[list[float]]) -> list[list[float]]:
+    def _calculate_deltas(self, sample: TrainingData, outputs_from_all_layers: list[np.ndarray]) \
+            -> list[np.ndarray]:
         """Calculate delta for each neuron in all layers.
 
         Args:
-            sample (TrainingData): sample of data, which was processed by network in current iteration
-            outputs_from_all_layers (list[list[float]]): output of each neuron in all layers for given sample
+            sample (TrainingData):
+                sample of data, which was processed by network in current iteration
+            outputs_from_all_layers (list[list[float]]):
+                output from each neuron in all layers for processed sample
 
         Returns:
-            list[list[float]]: Deltas for each neuron in all layers.
+            list[ndarray]: List of vectors containing deltas for neurons.
         """
-        output_from_last_layer: list[float] = outputs_from_all_layers[-1]
-        deltas_for_output_layer: list[float] = self._calculate_deltas_for_output_layer(
-            sample, output_from_last_layer)
-        deltas_for_hidden_layers: list[list[float]] = self._calculate_deltas_for_hidden_layers(
+        output_from_last_layer: np.ndarray = outputs_from_all_layers[-1]
+        deltas_for_output_layer: np.ndarray = self._calculate_deltas_for_output_layer(
+            sample.desired_outputs, output_from_last_layer)
+        deltas_for_hidden_layers: list[np.ndarray] = self._calculate_deltas_for_hidden_layers(
             outputs_from_all_layers, deltas_for_output_layer)
-        deltas_for_all_layers = deltas_for_hidden_layers
+        deltas_for_all_layers: list[np.ndarray] = deltas_for_hidden_layers
         deltas_for_all_layers.append(deltas_for_output_layer)
         return deltas_for_all_layers
 
-    def _calculate_deltas_for_output_layer(self, sample: TrainingData, output_from_last_layer: list[float]) -> list[float]:
+    @staticmethod
+    def _calculate_deltas_for_output_layer(target_vector: np.ndarray,
+                                            output_vector: np.ndarray) -> np.ndarray:
         """Calculate deltas for all neurons in the output layer.
 
         Args:
-            sample (TrainingData): sample of data, which was processed by network in current iteration
-            output_from_last_layer (list[float]): actual output, which was returned by neural network for processed sample
+            target_vector (ndarray):
+                vector which contains desired outputs for output layer
+            output_vector (ndarray):
+                vector which contains actual outputs from output layer
 
         Returns:
-            list[float]: Errors for each neuron in output layer.
+            ndarray: Vector with deltas for each neuron from output layer.
         """
-        deltas_for_output_layer: list[float] = []
-        for output_index in range(self.number_of_outputs):
-            d_for_neuron: float = sample.desired_outputs[output_index]
-            y_for_neuron: float = output_from_last_layer[output_index]
-            delta_for_neuron: float = (d_for_neuron - y_for_neuron) * y_for_neuron * (1 - y_for_neuron)
-            deltas_for_output_layer.append(delta_for_neuron)
-        return deltas_for_output_layer
+        return (target_vector - output_vector) * output_vector * (1 - output_vector)
 
-    def _calculate_deltas_for_hidden_layers(self, outputs_from_all_layers: list[list[float]],
-                                            deltas_for_output_layer: list[float]) -> list[list[float]]:
+    def _calculate_deltas_for_hidden_layers(self, outputs_from_all_layers: list[np.ndarray],
+                                            deltas_for_output_layer: np.ndarray) -> list[np.ndarray]:
         """Calculate deltas for all neurons in the hidden layers.
 
         Args:
-            outputs_from_all_layers (Tlist[list[float]]): outputs from each neuron in neural network
-            deltas_for_output_layer (list[float]): deltas calculated for each neuron in output layer of neural network
+            outputs_from_all_layers (list[np.ndarray]):
+                outputs from each neuron in neural network in form of list of vectors
+            deltas_for_output_layer (np.ndarray):
+                vector consisting of deltas calculated for each neuron in output layer
 
         Returns:
-            list[float]: Errors for each neuron in output layer.
+            list[np.ndarray]:
+                List of vectors containing deltas for neurons that are in hidden layers.
         """
         number_of_layers: int = len(self.number_of_neurons_in_each_layer)
         one_before_last_layer_index: int = number_of_layers - 2
-        deltas_for_hidden_layers = [deltas_for_output_layer]
+        deltas_for_hidden_layers: list[np.ndarray] = [deltas_for_output_layer]
         for layer_index in range(one_before_last_layer_index, -1, -1):
-            deltas_for_neurons_in_layer = []
-            number_of_neurons_in_layer = self.number_of_neurons_in_each_layer[layer_index]
-            for neuron_index in range(number_of_neurons_in_layer):
-                neuron_error = self._calculate_delta_for_neuron_in_hidden_layer(
-                    layer_index, neuron_index, outputs_from_all_layers, deltas_for_hidden_layers[0])
-                deltas_for_neurons_in_layer.append(neuron_error)
-            deltas_for_hidden_layers.insert(0, deltas_for_neurons_in_layer)
-        deltas_for_hidden_layers.pop() # removing deltas for output layer
+            deltas_for_next_layer: np.ndarray = deltas_for_hidden_layers[0]
+            transposed_weights_for_layer_without_biases: np.ndarray = (
+                (self.weights[layer_index+1])[:,1:].T)
+            weighted_sums: np.ndarray = (transposed_weights_for_layer_without_biases
+                                         @ deltas_for_next_layer)
+            deltas_for_layer: np.ndarray = self._calculate_deltas_vector_for_hidden_layer(
+                weighted_sums, outputs_from_all_layers[layer_index])
+            deltas_for_hidden_layers.insert(0, deltas_for_layer)
+        deltas_for_hidden_layers.pop()  # removing deltas for output layer
         return deltas_for_hidden_layers
 
-    def _calculate_delta_for_neuron_in_hidden_layer(self, layer_index: int, neuron_index: int,
-                                                    outputs_from_all_layers: list[list[float]],
-                                                    deltas_for_next_layer: list[float]) -> float:
-        """Calculate delta for neuron, what is needed to adjust weights for
-        next iterations of backpropagation algorithm.
-
-        Args:
-            layer_index (int): index of the layer, where neuron is
-            neuron_index (int): index of neuron that you want to calculate error
-            outputs_from_all_layers (list[list[float]]): outputs from each neuron in each layer
-            deltas_for_next_layer (list[float]): errors calculated for the neurons in layer of index layer_index+1
-
-        Returns:
-            float: Delta for neuron.
-        """
-        delta: float = 0
-        number_of_neurons_in_next_layer: int = self.number_of_neurons_in_each_layer[layer_index+1]
-        for neuron_in_next_layer_index in range(number_of_neurons_in_next_layer):
-            weight = self.weights[layer_index+1][neuron_in_next_layer_index][neuron_index+1]
-            error_for_neuron_in_next_layer = deltas_for_next_layer[neuron_in_next_layer_index]
-            delta += error_for_neuron_in_next_layer * weight
-        neuron_output = outputs_from_all_layers[layer_index][neuron_index]
-        delta = delta * (-1) * neuron_output * (1 - neuron_output)
-        return delta
+    @staticmethod
+    def _calculate_deltas_vector_for_hidden_layer(weighted_sums: np.ndarray,
+            output_vector_from_layer: np.ndarray) -> np.ndarray:
+        return (-1) * weighted_sums * output_vector_from_layer * (1 - output_vector_from_layer)
 
     @staticmethod
-    def _calculate_u(inputs: list[float], weights_for_neuron: list[float]) -> float:
-        """Calculate value that is weighted sum of each input in inputs vector
-        and associated weight.
-
-        Args:
-            inputs (list[float]): vector which contains all the input values for given neuron
-            weights_for_neuron (list[float]): vector which contains all weights for neuron
+    def _get_random_sample_from_set(indexes_of_not_processed_samples: list[int],
+                                    sample_set: list[TrainingData]) -> TrainingData:
+        """Get random sample from sample set, removes sample index from the set
+        to not allow for getting the same sample more than once.
 
         Returns:
-            float: Value should be passed as argument to activation function
+            TrainingData: Drawn random sample.
         """
-        number_of_inputs_for_neuron: int = len(inputs)
-        u = 0
-        for input_index in range(number_of_inputs_for_neuron):
-            u += inputs[input_index] * weights_for_neuron[input_index]
-        return u
+        index_from_not_processed_samples: int = randint(
+            0, len(indexes_of_not_processed_samples) - 1)
+        sample_index: int = indexes_of_not_processed_samples[index_from_not_processed_samples]
+        del indexes_of_not_processed_samples[index_from_not_processed_samples]
+        sample: TrainingData = sample_set[sample_index]
+        return sample
 
     @staticmethod
-    def _calculate_mean_squared_error(outputs: list[float], desired_outputs: list[float]) -> float:
+    def _calculate_mean_squared_error(outputs: np.ndarray, targets: np.ndarray) -> float:
         """Calculate mean squared error for output vector and desired outputs for that vector.
 
         Args:
             outputs (list[float]): vector which contains all the outputs given by output layer
-            desired_outputs (list[float]): vector which contains all the desired outputs from last layer
+            targets (list[float]): vector which contains all the desired outputs from last layer
 
         Returns:
             float: Mean squared error for given vector.
         """
-        mse: float = 0
-        number_of_outputs: int = len(outputs)
-        for output_index in range(number_of_outputs):
-            mse += (desired_outputs[output_index] - outputs[output_index]) ** 2
-        mse *= 0.5
-        return mse
+        return np.sum((targets - outputs) ** 2) * 0.5
 
     @staticmethod
-    def _get_input_vector_with_bias_input(inputs: list[float]) -> list[float]:
-        """Create new inputs vector which contains artificial bias input of value 1
-        at index 0.
+    def _init_training_progress_dict():
+        return {
+            "e": [],
+            "q_for_epoch": [],
+            "q_for_test_set": [],
+            "started_at": [],
+            "finished_at": [],
+            "total_time": []
+        }
+
+    @staticmethod
+    def _report_training_progress_to_excel_file(training_progress: dict) -> None:
+        """Save information about training progress to excel file.
 
         Args:
-            inputs (list[float]): vector which contains all the input values for given neuron
-
-        Returns:
-            list[float]: New input vector containing bias input.
+            training_progress (dict): dictionary which stores information
+            about each processed epoch
         """
-        input_for_bias_weight: int = 1
-        return [input_for_bias_weight] + inputs
+        df = pd.DataFrame(training_progress)
+        df.to_excel("report_from_training.xlsx", index=False)
 
     def __str__(self) -> str:
         """
